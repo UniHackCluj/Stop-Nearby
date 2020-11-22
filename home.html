@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<link rel="stylesheet" href="home_css.css" type="text/css"> <!-- CSS File -->
+    <title>Stop Nearby</title>
+	<!-- Importing Google Maps SDK with my API key -->
+    <script
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBGzvwP0MoUYNRyE8j82R40lvAo3UvHQ9U&callback=initMap&libraries=&v=weekly"
+      defer
+    ></script>
+	<!-- Main JavaScript program -->
+	<!-- We will not erase console.log() lines of code, because they are what helped us the most -->
+    <script>
+		var parkings = []; // global list which contains all the markers
+		var map; // global map
+		var current_position; // your current position (later found with geolocation)
+		var destination, lowest_distance, dest; // your destination, last 2 variables are used only to help find it
+		var i; // current marker
+		var number_of_markers = 20; // total number of markers on the map
+		
+		// creates a marker and adds it in the parkings list
+		// based on lat, long, empty or not, a cool bounce animation
+		function putMarker(latitude, longitude, isEmpty) {
+			var icon_url = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
+			var mtitle = "Empty";
+			if (isEmpty == false) {
+				icon_url = "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
+				mtitle = "Occupied"
+			}
+			// the new marker
+			const new_marker = new google.maps.Marker({
+				position: { lat: latitude, lng: longitude },
+				animation: google.maps.Animation.DROP,
+			    icon: {
+					url: icon_url
+			  	},
+				title: mtitle
+			});
+			new_marker.addListener("click", toggleBounce);
+			parkings.push(new_marker);
+		}
+		
+		// animation function for the marker
+		function toggleBounce() {
+			if (marker.getAnimation() !== null) {
+				marker.setAnimation(null);
+			} else {
+				marker.setAnimation(google.maps.Animation.BOUNCE);
+			}
+		}
+		
+		// the initialization function
+        function initMap() {
+			map = new google.maps.Map(document.getElementById("map"), {
+          		zoom: 12
+        	});
+			
+			// geolocation to find your current location on google maps
+			// (depends a lot on your IP)
+			// we also handled the errors
+			infoWindow = new google.maps.InfoWindow;
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function (position) {
+					// current position
+					var pos = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                    infoWindow.setPosition(pos);
+                    infoWindow.setContent('Your are here.');
+                    infoWindow.open(map);
+                    map.setCenter(pos);
+					
+					// new marker on that position
+					var icon_url = "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png";
+					var mtitle = "You";
+					const my_marker = new google.maps.Marker({
+						position: { lat: position.coords.latitude, lng: position.coords.longitude },
+						animation: google.maps.Animation.DROP,
+						icon: {
+							url: icon_url
+						},
+						title: mtitle
+					});
+					my_marker.addListener("click", toggleBounce);
+					// ading it to parkings (it's the last element in the list)
+					parkings.push(my_marker);
+					// this code is executed after the 'for' at line 99
+					// so all markers are ready to be shown on the map
+					showMarkers(map);
+                }, function () {
+                    handleLocationError(true, infoWindow, map.getCenter());
+                });
+            } else {
+                handleLocationError(false, infoWindow, map.getCenter());
+            }		
+			
+			// now because we do not have completed the program in which
+			// arduino sends us the status of every parking spot,
+			// we generated randomly the markers near Cluj-Napoca, Romania
+			var lat, long;
+			lat = 46.768281;
+			long = 23.593864;
+			for (i = 0; i < number_of_markers; ++i) {
+				// new lat, long
+				var off_lat, off_long;
+				off_lat = Math.random() * 0.02;
+				off_long = Math.random() * 0.05;
+				if (Math.random() > 0.5)
+					off_lat = -off_lat;
+				if (Math.random() > 0.5)
+					off_long = -off_long;
+				// empty or occupied
+				if (Math.random() > 0.5)
+					putMarker(lat + off_lat, long + off_long, false);
+				else
+					putMarker(lat + off_lat, long + off_long, true);
+			}
+		}
+		
+		// shows all markers on the map with some timing difference,
+		// just to look cooler for small numbers
+		// if the number of markers is higher, we recommend turning off this timing
+		function showMarkers() {
+			for (i = 0; i < parkings.length; ++i)
+				addMarkerWithTimeout(window.parkings[i], i * 20);
+		}
+		
+		function addMarkerWithTimeout(marker, timeout) {
+        	window.setTimeout(function() {marker.setMap(map)}, timeout);
+      	}
+		
+		// geolocation error handler function
+		function handleLocationError(browserHasGeolocation, infoWindow, pos) {
+            infoWindow.setPosition(pos);
+            infoWindow.setContent(browserHasGeolocation ?
+                'Error: The Geolocation service failed.' :
+                'Error: Your browser doesn\'t support geolocation.');
+            infoWindow.open(map);
+        }
+		// THIS ALL ABOVE IS ABOUT INITIALIZATION ONLY
+		// --------------------------------------------------------------
+		// THIS ALL BELOW IS ABOUT FINDIND THE CLOSEST EMPTY PARKING SPOT
+		
+		// it is called when pressed on the only button in the webpage
+		// main function
+		function findDistance() {
+			// our current position is the last marker which was added in the list
+			current_position = parkings[parkings.length - 1];
+			lowest_distance = 1000000000; // a very big number
+			i = 1;
+			// Why we used set interval with 250ms for each call:
+			// I mean, I have been looking for a solution for several hours, but I could not find much
+			// I tried with async functions and await, but that didn't work out properly.
+			// It's the first time I've been using JS this much and I just found out that it is multitasking :D
+			// So the functions (I don't know, maybe) were called on the same time and all went wrong
+			// After experimentations, I set the timing difference to 250ms. It's the best safe one.
+			// Now, the setbacks: to be honest, I know: this is going to take a while for 50, 100, or even 1000 parking spots
+			// I did not have time to come with a better solution, considering again that this is my first time "for real" with JS
+			setInterval(function(){
+				// updating the button text and position
+				// if it reached 100%, the button will move down to make space for some text
+				var percentage = Math.floor(Math.min(i / parkings.length, 1) * 100);
+				document.getElementById("find_button").innerHTML = "Finding... " + percentage + "%";
+				if (percentage == 100) {
+					document.getElementById("find_button").innerHTML = "Found! " + percentage + "%";
+					document.getElementById("find_button").style.transition = "top 1s linear";
+					document.getElementById("find_button").style.top = "95%";
+				}
+				// if we are out of bounds, we simply return
+				if (i > parkings.length)
+					return;
+				// after the last (length - 1) element was processed
+				if (i == parkings.length) {
+					// a lot of console.logs in this JS, I know, but it was for the best
+					console.log("FINAL: " + lowest_distance);
+					console.log("DESTINATION: " + destination.position.lat());
+					console.log("DEST: " + dest.position.lat());
+					// getting the directions
+					var directionsService = new google.maps.DirectionsService();
+					var directionsRenderer = new google.maps.DirectionsRenderer();
+					directionsRenderer.setMap(map);
+					var request = {
+						origin: new google.maps.LatLng(current_position.position.lat(), current_position.position.lng()),
+						destination: new google.maps.LatLng(destination.position.lat(), destination.position.lng()),
+						travelMode: 'DRIVING'
+					};
+					// processing the route
+					directionsService.route(request,
+					function(response, status) {
+						if (status !== 'OK') { // if it failed
+							window.alert('Directions request failed due to ' + status);
+							return;
+						} else { // it was completed successfully
+							directionsRenderer.setDirections(response);
+							var directionsData = response.routes[0].legs[0];
+							if (!directionsData) { // if it did not find any routes
+								window.alert('Directions request failed');
+								return;
+							}
+							else { // if it found the route, we update everything and start showing them
+								console.log(directionsData.distance.value);
+								document.getElementById("distance").innerHTML = "DISTANCE: " + directionsData.distance.text;
+								document.getElementById("distance").style.opacity = "1";
+								document.getElementById("duration").innerHTML = "DURATION: " + directionsData.duration.text;
+								document.getElementById("duration").style.opacity = "1";
+								document.getElementById("from").style.opacity = "1";
+								document.getElementById("to").style.opacity = "1";
+							}
+						}
+					});
+					++i;
+				}
+				// if it is still in range
+				if (i <= parkings.length) {
+					console.log("->" + i);
+					// we update the button's colors just to look cooler.
+					if (percentage >= 75) {
+						document.getElementById("find_button").style.color = "#12FF00";
+						document.getElementById("find_button").style.border = "1px solid #12FF00";
+					}
+					else if (percentage >= 50) {
+						document.getElementById("find_button").style.color = "#BAC600";
+						document.getElementById("find_button").style.border = "1px solid #BAC600";
+					}
+					else if (percentage >= 25) {
+						document.getElementById("find_button").style.color = "orange";
+						document.getElementById("find_button").style.border = "1px solid orange";
+						document.getElementById("find_button").style.transition = "all 3s linear";
+					}
+					else {
+						document.getElementById("find_button").style.color = "red";
+						document.getElementById("find_button").style.border = "1px solid red";
+						document.getElementById("find_button").style.transition = "all 0s linear";
+					}
+					// we verify it, and then we check the distance from our position to i-th element
+					if (i < parkings.length)
+						if (parkings[i].title == 'Empty')
+							check_distance();
+				}
+				++i;
+			}, 250);
+		}
+		
+		// checks the distance between your current position
+		// and the i-th parking spot (if it is empty)
+		function check_distance() {
+			dest = parkings[i];
+			var service = new google.maps.DistanceMatrixService();
+			const originA = {lat: current_position.position.lat(), lng: current_position.position.lng()}
+			const destinationA = {lat: dest.position.lat(), lng: dest.position.lng()}
+			service.getDistanceMatrix({
+				origins: [originA],
+				destinations: [destinationA],
+				travelMode: 'DRIVING',
+				unitSystem: google.maps.UnitSystem.METRIC,
+      			avoidHighways: false
+			},
+			callback_distance);
+		}
+		
+		// callback for distance matrix with response and status
+		function callback_distance(response, status) {
+			if (status == 'OK') { // if all went well, we have a new distance
+				var origins = response.originAddresses;
+				var destinations = response.destinationAddresses;
+				var results = response.rows[0].elements;
+				var element = results[0];
+				var distance = element.distance.value;
+				var from = origins[0];
+				var to = destinations[0];
+				console.log(from + " -> " + to + " : " + distance);
+				if (distance < lowest_distance) { // if it is less than we have yet, we update
+					lowest_distance = distance;
+					destination = dest;
+					console.log("NEW DIST: " + distance);
+					document.getElementById("from").innerHTML = "FROM: " + from;
+					document.getElementById("to").innerHTML = "TO: " + to;
+				}
+			}
+		}
+	</script>
+</head>
+<!-- BODY -->
+<body>
+	<p id="title">Stop Nearby</p>
+    <div id="map"></div>
+	<p class="developed">Developed by</p>
+	<p class="authors">Marc Vana &amp; Mihai Marcu</p>
+	<button id="find_button" onclick="findDistance()">Closest Empty Parking</button>
+	<p id="from">FROM:</p>
+	<p id="to">TO:</p>
+	<p id="distance">DISTANCE:</p>
+	<p id="duration">DURATION:</p>
+</body>
+</html>
